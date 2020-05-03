@@ -38,11 +38,12 @@
  *  09-23-2017 : Changed layout to look like my Zooz DTH, cleaned up code a lot.
  *  10-04-2017 : Fixed reset issues with energy/kWh not resetting properly.  (more of a workaround for now)
  *  10-07-2017 : Changed several tiles from standard to value to resolve iOS rendering issue.
- *  11-29-2017 : Added resetMeter so that the device can be reset by my SmartApp based on a schedule
+ *  11-29-2017 : Added resetMeter so that the device can be reset by my SmartApp based on a schedule.
+ *  08-21-2018 : Added metadata fields for the new Samsung app.
  *
  */
 metadata {
-	definition (name: "My Aeon Metering Switch", namespace: "jscgs350", author: "SmartThings") {
+	definition (name: "My Aeon Metering Switch", namespace: "jscgs350", author: "SmartThings", ocfDeviceType: "oic.d.switch", mnmn: "SmartThings", vid:"generic-switch-power-energy") {
 		capability "Energy Meter"
 		capability "Actuator"
 		capability "Switch"
@@ -106,7 +107,7 @@ metadata {
 			state "default", label:'\nRefresh', action:"refresh.refresh", icon:"st.secondary.refresh-icon"
 		}
 		standardTile("power2", "device.power", width: 3, height: 1, decoration: "flat") {
-			state "power", icon: "st.secondary.activity", label:'${currentValue} W'
+			state "power", icon: "st.switches.switch.on", label:'${currentValue} W'
 		}
 
 		main "power2"

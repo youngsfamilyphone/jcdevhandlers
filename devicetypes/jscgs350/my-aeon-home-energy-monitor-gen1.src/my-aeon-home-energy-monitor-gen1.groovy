@@ -59,10 +59,12 @@
  *  10-04-2017 : Fixed reset issues with energy/kWh not resetting properly.  (more of a workaround for now)
  *  10-07-2017 : Fixed code for battery reports still going to the Recently tab in the mobile app even though the option not to send messages was enabled.
  *  10-26-2017 : Added 2 new attributes to capture kWh and cost data before they're reset in case someone needs to refer back to them for any reason.  These can be seen in the IDE and in the Recently Tab in the mobile app.
+ *  10-04-2018 : Trying to include code for new Samsung mobile app, and cleaned up code for battery reporting since the HEM doesn't report a real value, just OK or low.
+ *  12-18-2018 : Added reset command.
  *
  */
 metadata {
-	definition (name: "My Aeon Home Energy Monitor Gen1", namespace: "jscgs350", author: "jscgs350")
+	definition (name: "My Aeon Home Energy Monitor Gen1", namespace: "jsconstantelos", author: "SmartThings", ocfDeviceType: "x.com.st.d.energymeter")
 	{
 		capability "Energy Meter"
 		capability "Power Meter"
@@ -71,7 +73,7 @@ metadata {
 		capability "Refresh"
 		capability "Polling"
 		capability "Battery"
-//		capability "Health Check"
+		capability "Health Check"
 
 		attribute "currentKWH", "string"		// Used to show current kWh since last reset
 		attribute "currentWATTS", "string"		// Used to show current watts being used on the main tile
@@ -80,6 +82,7 @@ metadata {
 		attribute "resetMessage", "string"		// Used for messages of what was reset (min, max, energy, or all values)
 		attribute "kwhCosts", "string"			// Used to show energy costs since last reset
 		attribute "batteryStatus", "string"
+        attribute "batteryMsg", "string"
         attribute "kWhLastReset", "number"
         attribute "CostLastReset", "number"
 
@@ -87,6 +90,7 @@ metadata {
 		command "resetmin"
 		command "resetmax"
 		command "resetMeter"
+        command "reset"
 
 		fingerprint deviceId: "0x2101", inClusters: " 0x70,0x31,0x72,0x86,0x32,0x80,0x85,0x60"
 	}
@@ -95,14 +99,14 @@ metadata {
 	tiles(scale: 2) {
 		multiAttributeTile(name:"currentWATTS", type: "generic", width: 6, height: 4, decoration: "flat"){
 			tileAttribute ("device.currentWATTS", key: "PRIMARY_CONTROL") {
-				attributeState "default", label: '${currentValue}W', icon: "https://raw.githubusercontent.com/constjs/jcdevhandlers/master/img/device-activity-tile@2x.png", backgroundColor: "#79b821"
+				attributeState "default", label: '${currentValue}W', icon: "https://raw.githubusercontent.com/jsconstantelos/SmartThings/master/img/device-activity-tile@2x.png", backgroundColor: "#79b821"
 			}
 			tileAttribute ("device.batteryStatus", key: "SECONDARY_CONTROL") {
-				attributeState "batteryStatus", label:'${currentValue}', icon:"https://raw.githubusercontent.com/constjs/jcdevhandlers/master/img/Battery-Charge-icon.png"
+				attributeState "batteryStatus", label:'${currentValue}', icon:"https://raw.githubusercontent.com/jsconstantelos/SmartThings/master/img/Battery-Charge-icon.png"
 			}
 		}
 		standardTile("iconTile", "iconTile", inactiveLabel: false, width: 1, height: 1) {
-			state "default", icon:"https://raw.githubusercontent.com/constjs/jcdevhandlers/master/img/device-activity-tile@2x.png"
+			state "default", icon:"https://raw.githubusercontent.com/jsconstantelos/SmartThings/master/img/device-activity-tile@2x.png"
 		}
 		valueTile("statusText", "statusText", inactiveLabel: false, decoration: "flat", width: 5, height: 1) {
 			state "statusText", label:'${currentValue}', backgroundColor:"#ffffff"
@@ -141,7 +145,8 @@ metadata {
 
 	preferences {
 		input "displayEvents", "boolean", title: "Display all power and energy events in the Recently tab and the device's event log?",	defaultValue: false, required: false, displayDuringSetup: true
-		input "displayBatteryLevel", "boolean", title: "Display battery level on main tile and Recently tab?", defaultValue: true, required: false, displayDuringSetup: true
+        input "displayUSBPower", "boolean", title: "Display the words - USB Power - on main tile if plugged in?", defaultValue: true, required: false, displayDuringSetup: true
+		input "displayBatteryLevel", "boolean", title: "Display battery status on main tile and Recently tab if you're using batteries?", defaultValue: true, required: false, displayDuringSetup: true
         input "kWhCost", "string", title: "Enter your cost per kWh (or just use the default, or use 0 to not calculate):", defaultValue: 0.16, required: false, displayDuringSetup: true
 		input "wattsLimit", "number", title: "Sometimes the HEM will send a wildly large watts value. What limit should be in place so that it's not processed? (in watts)", defaultValue: 20000, required: false, displayDuringSetup: true
 		input "reportType", "number", title: "ReportType: Send watt/kWh data on a time interval (0), or on a change in wattage (1)? Enter a 0 or 1:", defaultValue: 1, range: "0..1", required: false, displayDuringSetup: true
@@ -159,6 +164,7 @@ def updated() {
 	sendEvent(name: "checkInterval", value: 2 * 15 * 60 + 2 * 60, displayed: false, data: [protocol: "zwave", hubHardwareId: device.hub.hardwareID])
 	state.displayDisabled = ("true" == displayEvents)
 	state.displayBattery = ("true" == displayBatteryLevel)
+    state.displayUSB = ("true" == displayUSBPower)
 	log.debug "updated (kWhCost: ${kWhCost}, wattsLimit: ${wattsLimit}, reportType: ${reportType}, wattsChanged: ${wattsChanged}, wattsPercent: ${wattsPercent}, secondsWatts: ${secondsWatts}, secondsKwh: ${secondsKwh}, secondsBattery: ${secondsBattery}, decimalPositions: ${decimalPositions})"
 	response(configure())
 }
@@ -173,14 +179,23 @@ def parse(String description) {
 	}
 //	if (result) log.debug "Result returned ${result}"
 
-	if (state.displayBattery) {
-		def batteryStatusmsg = "USB power, batteries at ${device.currentState('battery')?.value}%"
-		sendEvent(name: "batteryStatus", value: batteryStatusmsg, displayed: false)
+	if (state.displayUSB) {
+    	if (state.displayBattery) {
+        	def batteryStatusmsg = "USB Power, ${device.currentState('batteryMsg')?.value}"
+			sendEvent(name: "batteryStatus", value: batteryStatusmsg, displayed: false)
+        } else {
+        	def batteryStatusmsg = "USB Power"
+			sendEvent(name: "batteryStatus", value: batteryStatusmsg, displayed: false)
+        }
 	} else {
-		def batteryStatusmsg = "USB power"
-		sendEvent(name: "batteryStatus", value: batteryStatusmsg, displayed: false)
+        if (state.displayBattery) {
+            def batteryStatusmsg = "${device.currentState('batteryMsg')?.value}"
+            sendEvent(name: "batteryStatus", value: batteryStatusmsg, displayed: false)
+        } else {
+            def batteryStatusmsg = ""
+            sendEvent(name: "batteryStatus", value: batteryStatusmsg, displayed: false)
+        }
 	}
-
 	return result
 }
 
@@ -281,12 +296,14 @@ def zwaveEvent(physicalgraph.zwave.commands.batteryv1.BatteryReport cmd) {
 		if (cmd.batteryLevel == 0xFF) { // low battery message from device
 			map.value = 1
 			map.isStateChange = true
+            sendEvent(name: "batteryMsg", value: "Batteries are LOW!" as String, displayed: true)
 		} else {
 			map.value = cmd.batteryLevel
 			map.isStateChange = true
+            sendEvent(name: "batteryMsg", value: "Battery level is OK" as String, displayed: true)
 		}
-	sendEvent(name: "battery", value: map.value as String, displayed: true)
-	return map
+		sendEvent(name: "battery", value: map.value as String, displayed: true)
+		return map
 	} else {
 		def map = [:]
 		map.name = "battery"
@@ -377,6 +394,10 @@ def resetmax() {
 		zwave.meterV2.meterGet(scale: 2).format()
 	])
 	cmd
+}
+
+def reset() {
+	resetMeter()
 }
 
 def resetMeter() {

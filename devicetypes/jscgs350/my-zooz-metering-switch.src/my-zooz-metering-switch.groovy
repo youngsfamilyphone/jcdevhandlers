@@ -17,10 +17,11 @@
  *  10-07-2017 : Changed several tiles from standard to value to resolve iOS rendering issue.
  *  12-01-2017 : Fixed history not properly being updated.
  *  02-02-2018 : Resolved on/off state not properly being reflected/updated in the mobile app or IDE.
+ *  12-18-2018 : Added reset command
  *
  */
 metadata {
-	definition (name: "My Zooz Metering Switch", namespace: "jscgs350", author: "SmartThings") {
+	definition (name: "My Zooz Metering Switch", namespace: "jscgs350", author: "SmartThings", ocfDeviceType: "oic.d.switch", mnmn: "SmartThings", vid:"generic-switch-power-energy") {
 		capability "Energy Meter"
 		capability "Actuator"
 		capability "Switch"
@@ -50,6 +51,7 @@ metadata {
         command "resetAmps"
 		command "resetMeter"
         command "configure"
+        command "reset"
 	}
 
     preferences {
@@ -111,9 +113,9 @@ metadata {
 			state "history", label:'${currentValue}'
 		}
 		standardTile("power2", "device.power", width: 3, height: 1, decoration: "flat") {
-			state "power", icon: "st.secondary.activity", label:'${currentValue} W'
+			state "power", icon: "st.switches.switch.on", label:'${currentValue} W'
 		}
-		main "power2"
+		main "switch"
 		details(["switch", "energy", "kwhCosts", "voltage", "current", "history", "resetWatts", "resetEnergy", "resetVolts", "resetAmps", "refresh"])
 	}
 }
@@ -426,6 +428,10 @@ def resetAmps() {
         zwave.meterV3.meterGet(scale: 5).format()
     ])
     cmd
+}
+
+def reset() {
+	resetMeter()
 }
 
 def resetMeter() {

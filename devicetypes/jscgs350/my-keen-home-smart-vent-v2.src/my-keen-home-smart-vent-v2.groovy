@@ -24,11 +24,12 @@
  *  01-13-2018 : Added fingerprint
  *  01-18-2018 : Converted pressure readings from Pascal to Hg (inch of mercury).
  *  01-21-2018 : Revert change made on 1/18/2018.  Back to Pa from Hg.
+ *  10-26-2018 : Created version 2.  Removed temp, pressure, and battery tiles.  Added battery level to the main tile.  Set temp/pressure reporting to once every 8 hours.
  *  10-27-2018 : Updated to account for Keen's zigbee bug when opening a vent - it can't anymore with a normal zigbee on command.  Using a set level command instead as a workaround.
  *
  */
 metadata {
-    definition (name: "My Keen Home Smart Vent", namespace: "jscgs350", author: "Keen Home") {
+    definition (name: "My Keen Home Smart Vent v2", namespace: "jscgs350", author: "Keen Home") {
         capability "Switch Level"
         capability "Switch"
         capability "Actuator"
@@ -53,24 +54,28 @@ metadata {
         command "ventLevelUp"
         command "ventLevelDown"
         
+        attribute "pressure", "number"
+        
         fingerprint endpoint: "1", profileId: "0104", inClusters: "0000,0001,0003,0004,0005,0006,0008,0020,0402,0403,0B05,FC01,FC02", outClusters: "0019"
 
     }
 
     // UI tile definitions
     tiles(scale: 2) {
-        multiAttributeTile(name:"switch", type: "lighting", width: 6, height: 4, canChangeIcon: true, decoration: "flat"){
+        multiAttributeTile(name:"switch", type: "lighting", width: 6, height: 4, decoration: "flat"){
             tileAttribute ("device.switch", key: "PRIMARY_CONTROL") {
-                attributeState "on", action: "switch.off", label: "OPEN", icon: "st.vents.vent-open", backgroundColor: "#00A0DC"
-                attributeState "off", action: "switch.on", label: "CLOSED", icon: "st.vents.vent", backgroundColor: "#ffffff"
+                attributeState "on", action: "switch.off", label: 'OPEN', icon: "st.vents.vent-open", backgroundColor: "#00A0DC"
+                attributeState "off", action: "switch.on", label: 'CLOSED', icon: "st.vents.vent", backgroundColor: "#ffffff"
                 attributeState "obstructed", action: "clearObstruction", label: "OBSTRUCTION", icon: "st.vents.vent", backgroundColor: "#ff0000"
                 attributeState "clearing", action: "", label: "CLEARING", icon: "st.vents.vent-open", backgroundColor: "#f0b823"
             }
             tileAttribute ("device.level", key: "SLIDER_CONTROL") {
-                attributeState "level", action:"switch level.setLevel"
+                attributeState("level", label:'OPEN', action:"switch level.setLevel")
+            }
+            tileAttribute ("device.battery", key: "SECONDARY_CONTROL") {
+                attributeState("default", label:'Battery is at ${currentValue}%')
             }
         }
-
         valueTile("ventTwentyFive", "device.level", width: 1, height: 1, inactiveLabel: false, decoration: "flat") {
             state "ventTwentyFive", label:'25', action:"ventTwentyFive"
         }
@@ -89,8 +94,16 @@ metadata {
 		valueTile("ventLevelDown", "device.level", width: 1, height: 1, inactiveLabel: false, decoration: "flat") {
             state "ventLevelDown", label:'5%', action:"ventLevelDown", icon:"st.thermostat.thermostat-down"
         }
-        
-        valueTile("temperature", "device.temperature", inactiveLabel: false, width: 2, height: 2) {
+        valueTile("refresh", "device.power", inactiveLabel: false, width: 3, height: 2, decoration: "flat") {
+            state "default", label:'Refresh', action:"refresh.refresh", icon:"st.secondary.refresh-icon"
+        }        
+        valueTile("configure", "device.configure", inactiveLabel: false, width: 3, height: 2, decoration: "flat") {
+            state "configure", label:'', action:"configuration.configure", icon:"st.secondary.configure"
+        }
+        valueTile("zigbeeId", "device.zigbeeId", inactiveLabel: true, decoration: "flat") {
+            state "serial", label:'${currentValue}', backgroundColor:"#ffffff"
+        }
+        valueTile("temperature", "device.temperature", inactiveLabel: false, width: 3, height: 2) {
             state "temperature", label:'${currentValue}°',
             backgroundColors:[
                 [value: 31, color: "#153591"],
@@ -102,24 +115,11 @@ metadata {
                 [value: 96, color: "#bc2323"]
             ]
         }
-        valueTile("pressure", "device.pressure", inactiveLabel: false, width: 2, height: 2, decoration: "flat") {
+        valueTile("pressure", "device.pressure", inactiveLabel: false, width: 3, height: 2, decoration: "flat") {
             state "pressure", label: 'Pressure ${currentValue}Pa', backgroundColor:"#ffffff"
         }
-        valueTile("battery", "device.battery", inactiveLabel: false, width: 2, height: 2, decoration: "flat") {
-            state "battery", label: 'Battery \n${currentValue}%', backgroundColor:"#ffffff"
-        }
-        valueTile("refresh", "device.power", inactiveLabel: false, width: 3, height: 2, decoration: "flat") {
-            state "default", label:'Refresh', action:"refresh.refresh", icon:"st.secondary.refresh-icon"
-        }        
-        valueTile("configure", "device.configure", inactiveLabel: false, width: 3, height: 2, decoration: "flat") {
-            state "configure", label:'', action:"configuration.configure", icon:"st.secondary.configure"
-        }
-        valueTile("zigbeeId", "device.zigbeeId", inactiveLabel: true, decoration: "flat") {
-            state "serial", label:'${currentValue}', backgroundColor:"#ffffff"
-        }
-        
         main (["switch"])
-        details(["switch", "ventLevelDown", "ventTwentyFive", "ventFifty", "ventSeventyFive", "ventHundred", "ventLevelUp", "temperature", "pressure", "battery", "refresh", "configure"])
+        details(["switch", "ventLevelDown", "ventTwentyFive", "ventFifty", "ventSeventyFive", "ventHundred", "ventLevelUp", "refresh", "configure"])
     }
 }
 
@@ -291,7 +291,7 @@ private Map makeLevelResult(rawValue) {
         name: "level",
         value: value,
         descriptionText: "${linkText} level is ${value}%",
-        displayed: false
+        displayed: true
     ]
 }
 
@@ -439,6 +439,7 @@ def clearObstruction() {
     ] + configure()
 }
 
+//Gets executed via the mobile app
 def setLevel(value) {
     log.debug "setting level: ${value}"
     def linkText = getLinkText(device)
@@ -452,7 +453,7 @@ def setLevel(value) {
     }
 
     sendEvent(name: "level", value: value, displayed: false)
-    
+
     if (value > 0) {
         sendEvent(name: "switch", value: "on", descriptionText: "${linkText} is on by setting a level")
     }
@@ -564,7 +565,7 @@ def refresh() {
 
 def configure() {
     log.debug "CONFIGURE"
-	sendEvent(name: "checkInterval", value: 2 * 60 * 60 + 1 * 60, displayed: false, data: [protocol: "zigbee", hubHardwareId: device.hub.hardwareID])
+
     // get ZigBee ID by hidden tile because that's the only way we can do it
     setZigBeeIdTile()
 
@@ -593,19 +594,19 @@ def configure() {
         // Yves Racine 2015/09/10: temp and pressure reports are preconfigured, but
         //   we'd like to override their settings for our own purposes
         // temperature - type: int16s, change: 0xA = 10 = 0.1C, 0x32=50=0.5C
-        "zcl global send-me-a-report 0x0402 0 0x29 60 3600 {0A00}", "delay 200",
+        "zcl global send-me-a-report 0x0402 0 0x29 28800 28800 {3200}", "delay 200",
         "send 0x${device.deviceNetworkId} 1 1", "delay 1500",
 
         // Yves Racine 2015/09/10: use new custom pressure attribute
         // pressure - type: int32u, change: 1 = 0.1Pa, 500=50 PA
         "zcl mfg-code 0x115B", "delay 200",
-        "zcl global send-me-a-report 0x0403 0x20 0x22 60 3600 {010000}", "delay 200",
+        "zcl global send-me-a-report 0x0403 0x20 0x22 28800 28800 {01F400}", "delay 200",
         "send 0x${device.deviceNetworkId} 1 1", "delay 1500",
 
         // mike 2015/06/2: preconfigured; see tech spec
         // battery - type: int8u, change: 1
-        "zcl global send-me-a-report 1 0x21 0x20 60 3600 {01}", "delay 200",
-        "send 0x${device.deviceNetworkId} 1 1", "delay 1500",
+         "zcl global send-me-a-report 1 0x21 0x20 3600 3600 {01}", "delay 200",
+         "send 0x${device.deviceNetworkId} 1 1", "delay 1500",
 
         // binding commands
         "zdo bind 0x${device.deviceNetworkId} 1 1 0x0006 {${device.zigbeeId}} {}", "delay 500",

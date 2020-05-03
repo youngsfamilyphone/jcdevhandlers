@@ -1,5 +1,5 @@
 /**
- *  Zigbee Valve
+ *  Copyright 2016 SmartThings
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  *  in compliance with the License. You may obtain a copy of the License at:
@@ -10,109 +10,142 @@
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
  *
- *  Version: v1
- *
- *  Updates:
- *  -------
- *  02-18-2016 : Initial commit
- *
  */
+import physicalgraph.zigbee.zcl.DataType
 
 metadata {
-	// Automatically generated. Make future change here.
-	definition (name: "My Zigbee Valve", namespace: "jscgs350", author: "SmartThings") {
-    	capability "Alarm"
-		capability "Polling"
-        capability "Refresh"
-        capability "Switch"
-		capability "Valve"
+    definition (name: "My ZigBee Valve", namespace: "jscgs350", author: "SmartThings", runLocally: false, minHubCoreVersion: '000.017.0012', executeCommandsLocally: false) {
+        capability "Actuator"
+        capability "Battery"
         capability "Configuration"
-	}
+        capability "Power Source"
+        capability "Health Check"
+        capability "Refresh"
+        capability "Valve"
+        capability "Switch"
+        capability "Contact Sensor"
 
-	// UI tile definitions
+        fingerprint profileId: "0104", inClusters: "0000, 0001, 0003, 0006, 0020, 0B02, FC02", outClusters: "0019", manufacturer: "WAXMAN", model: "leakSMART Water Valve v2.10", deviceJoinName: "leakSMART Valve"
+        fingerprint profileId: "0104", inClusters: "0000, 0001, 0003, 0004, 0005, 0006, 0008, 000F, 0020, 0B02", outClusters: "0003, 0019", manufacturer: "WAXMAN", model: "House Water Valve - MDL-TBD", deviceJoinName: "Waxman House Water Valve"
+    }
+
     tiles(scale: 2) {
-		multiAttributeTile(name:"switch", type: "generic", width: 6, height: 4, canChangeIcon: true, decoration: "flat"){
-			tileAttribute ("device.switch", key: "PRIMARY_CONTROL") {
-				attributeState "on", label: 'open', action: "switch.off", icon: "st.valves.water.open", backgroundColor: "#53a7c0"
-				attributeState "off", label: 'closed', action: "switch.on", icon: "st.valves.water.closed", backgroundColor: "#ff0000"
-			}
+        multiAttributeTile(name:"contact", type: "generic", width: 6, height: 4, canChangeIcon: true){
+            tileAttribute ("device.contact", key: "PRIMARY_CONTROL") {
+                attributeState "open", label: '${name}', action: "valve.close", icon: "st.valves.water.open", backgroundColor: "#00A0DC", nextState:"closing"
+                attributeState "closed", label: '${name}', action: "valve.open", icon: "st.valves.water.closed", backgroundColor: "#ff0000", nextState:"opening"
+                attributeState "opening", label: '${name}', action: "valve.close", icon: "st.valves.water.open", backgroundColor: "#f0b823", nextState:"closing"
+                attributeState "closing", label: '${name}', action: "valve.open", icon: "st.valves.water.closed", backgroundColor: "#f0b823", nextState:"opening"
+            }
+            tileAttribute ("powerSource", key: "SECONDARY_CONTROL") {
+                attributeState "powerSource", label:'Power Source: ${currentValue}'
+            }
         }
-        standardTile("refresh", "device.switch", width: 3, height: 2, inactiveLabel: false, decoration: "flat") {
-            state "default", label:'', action:"refresh.refresh", icon:"st.secondary.refresh"
+
+        valueTile("battery", "device.battery", inactiveLabel:false, decoration:"flat", width:3, height:2) {
+            state "battery", action:"configuration.configure", label:'${currentValue}% battery', unit:""
         }
-		standardTile("configure", "device.configure", width: 3, height: 2, inactiveLabel: false, decoration: "flat") {
-			state "configure", label:'', action:"configuration.configure", icon:"st.secondary.configure"
-		}
-        main (["switch"])
-        details(["switch", "refresh", "configure"])
+
+        standardTile("refresh", "device.refresh", inactiveLabel: false, decoration: "flat", width: 3, height: 2) {
+            state "default", label:"", action:"refresh.refresh", icon:"st.secondary.refresh"
+        }
+
+        main(["contact"])
+        details(["contact", "battery", "refresh"])
     }
 }
 
+private getCLUSTER_BASIC() { 0x0000 }
+private getBASIC_ATTR_POWER_SOURCE() { 0x0007 }
+private getCLUSTER_POWER() { 0x0001 }
+private getPOWER_ATTR_BATTERY_PERCENTAGE_REMAINING() { 0x0021 }
+
 // Parse incoming device messages to generate events
 def parse(String description) {
-	log.info description
-	if (description?.startsWith("catchall:")) {
-        def value = name == "switch" ? (description?.endsWith(" 1") ? "on" : "off") : null
-		def result = createEvent(name: name, value: value)
-        def msg = zigbee.parse(description)
-		log.debug "Parse returned ${result?.descriptionText}"
-		return result
-		log.trace msg
-		log.trace "data: $msg.data"
-	}
-	else {
-		def name = description?.startsWith("on/off: ") ? "switch" : null
-		def value = name == "switch" ? (description?.endsWith(" 1") ? "on" : "off") : null
-		def result = createEvent(name: name, value: value)
-		log.debug "Parse returned ${result?.descriptionText}"
-		return result
-	}
+    log.debug "description is $description"
+    def event = zigbee.getEvent(description)
+    if (event) {
+        if(event.name == "switch") {
+            event.name = "contact"                  //0006 cluster in valve is tied to contact
+            if(event.value == "on") {
+                event.value = "open"
+            }
+            else if(event.value == "off") {
+                event.value = "closed"
+            }
+        } else if (event.name == "powerSource") {
+            event.value = event.value.toLowerCase()
+        }
+        sendEvent(event)
+        //handle valve attribute
+        event.name = "valve"
+        sendEvent(event)
+    }
+    else {
+        def descMap = zigbee.parseDescriptionAsMap(description)
+        if (descMap.clusterInt == CLUSTER_BASIC && descMap.attrInt == BASIC_ATTR_POWER_SOURCE){
+            def value = descMap.value
+            if (value == "01" || value == "02") {
+                sendEvent(name: "powerSource", value: "AC Power")
+            }
+            else if (value == "03") {
+                sendEvent(name: "powerSource", value: "Backup Battery")
+            }
+            else if (value == "04") {
+                sendEvent(name: "powerSource", value: "dc")
+            }
+            else {
+                sendEvent(name: "powerSource", value: "unknown")
+            }
+        }
+        else if (descMap.clusterInt == CLUSTER_POWER && descMap.attrInt == POWER_ATTR_BATTERY_PERCENTAGE_REMAINING) {
+            event.name = "battery"
+            event.value = Math.round(Integer.parseInt(descMap.value, 16) / 2)
+            sendEvent(event)
+        }
+        else {
+            log.warn "DID NOT PARSE MESSAGE for description : $description"
+            log.debug descMap
+        }
+    }
+}
+
+def open() {
+    zigbee.on()
 }
 
 def on() {
-	log.debug "on()"
-	sendEvent(name: "switch", value: "on")
-    sendEvent(name: "valve", value: "open")
-	"st cmd 0x${device.deviceNetworkId} 1 6 1 {}"
+    zigbee.on()
+}
+
+def close() {
+    zigbee.off()
 }
 
 def off() {
-	log.debug "off()"
-	sendEvent(name: "switch", value: "off")
-    sendEvent(name: "valve", value: "closed")
-	"st cmd 0x${device.deviceNetworkId} 1 6 0 {}"
-}
-
-// This is for when the the valve's ALARM capability is called
-def both() {
-	log.debug "Closing Main Water Valve due to an ALARM capability condition"
-	sendEvent(name: "switch", value: "off")
-    sendEvent(name: "valve", value: "closed")
-	"st cmd 0x${device.deviceNetworkId} 1 6 0 {}"
-}
-
-// This is for when the the valve's VALVE capability is called
-def open() {
-	log.debug "on()"
-	sendEvent(name: "switch", value: "on")
-    sendEvent(name: "valve", value: "open")
-	"st cmd 0x${device.deviceNetworkId} 1 6 1 {}"
-}
-
-// This is for when the the valve's VALVE capability is called
-def close() {
-	log.debug "off()"
-	sendEvent(name: "switch", value: "off")
-    sendEvent(name: "valve", value: "closed")
-	"st cmd 0x${device.deviceNetworkId} 1 6 0 {}"
+    zigbee.off()
 }
 
 def refresh() {
-	log.debug "sending refresh command"
-	"st rattr 0x${device.deviceNetworkId} 1 6 0"
+    log.debug "refresh called"
+    zigbee.onOffRefresh() +
+    zigbee.readAttribute(CLUSTER_BASIC, BASIC_ATTR_POWER_SOURCE) +
+    zigbee.readAttribute(CLUSTER_POWER, POWER_ATTR_BATTERY_PERCENTAGE_REMAINING) +
+    zigbee.onOffConfig() +
+    zigbee.configureReporting(CLUSTER_POWER, POWER_ATTR_BATTERY_PERCENTAGE_REMAINING, DataType.UINT8, 600, 21600, 1) +
+    zigbee.configureReporting(CLUSTER_BASIC, BASIC_ATTR_POWER_SOURCE, DataType.ENUM8, 5, 21600, 1)
 }
 
 def configure() {
-	log.debug "configure()"
-	"zdo bind 0x${device.deviceNetworkId} 1 1 6 {${device.zigbeeId}} {}"
+    log.debug "Configuring Reporting and Bindings."
+    sendEvent(name: "checkInterval", value: 2*15* 60 + 2 * 60, displayed: false, data: [protocol: "zigbee", hubHardwareId: device.hub.hardwareID, offlinePingable: "1"])
+    refresh()
+}
+
+def installed() {
+    sendEvent(name: "checkInterval", value: 2*15* 60 + 2 * 60, displayed: false, data: [protocol: "zigbee", hubHardwareId: device.hub.hardwareID, offlinePingable: "1"])
+}
+
+def ping() {
+    zigbee.onOffRefresh()
 }
